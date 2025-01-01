@@ -1,0 +1,6 @@
+# Ignore the following files/folders:
+.vscode/
+CX/
+*.html
+*.csv
+*.pdf
