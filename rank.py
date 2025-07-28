@@ -1,32 +1,18 @@
 #%%
+import re
 import openelo
-from thefuzz import fuzz
+from difflib import SequenceMatcher
 import numpy as np
 import pandas as pd
 import os
-import warnings
-from datetime import datetime, timezone
+import datetime
+import pickle
+import json
 
 #%%
 
-def find_outlier(element, folder_path = './CX'):
-    """
-    Finds and prints every file in folder_path where element is present in the 'Name' column
-
-    Args:
-        element (str): string to search for in the files
-        folder_path (str, optional): Folder where to scan the different files. Defaults to './CX'.
-    """
-    for file in sorted(os.listdir(folder_path)):
-        file_path = os.path.join(folder_path,file)
-        if os.path.isfile(file_path):
-            csv = get_csv(file_path)
-            if any([element in el for el in csv['Name'].to_list()]):
-                print(file_path)
-
-
-class Ranker():
-    def __init__(self, method = 'elommr', previous_rank = None):
+class Ranker:
+    def __init__(self, method = 'elommr', previous_rank = None, cache_dir = './cache'):
         """
         Initialize the class
 
@@ -38,22 +24,24 @@ class Ranker():
             ValueError: _description_
         """
 
+        self.cache_dir = cache_dir
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
+
         if method == 'elommr':
             self.method = openelo.EloMMR()
             self.method_name = 'elommr'
         else:
             raise ValueError("Only 'elommr' as a method is handled yet")
         
-        self.crp =  openelo.ContestRatingParams(weight=1.)
+        self.players = {} # name -> Player object
+        self.name_mapping = self.load_name_mappings()  # Load from cache
+        self.race_history = []
 
-        self.players = None
-        self.synonyms = None
-        self.rank_history = None
-
-        if not previous_rank is None:
+        if previous_rank:
             try:
-                df = pd.read_csv(previous_rank, header=None, names=['Rank','Name','Rating'])
-                self.previous_rank = dict(zip(df['Name'].to_list(),df['Rating'].to_list()))
+                df = pd.read_csv(previous_rank, header=None, names=['rank','name','rating'])
+                self.previous_rank = dict(zip(df['name'].to_list(),df['rating'].to_list()))
             except:
                 self.previous_rank = None
         else: 
@@ -73,46 +61,69 @@ class Ranker():
         Returns:
             pd.Dataframe: content of the csv file
         """
-        #TODO: Read directly xlsx files and parse information from it
         try:
-            out = pd.read_csv(path, header=None, names=['Place','Name'])
+            out = pd.read_csv(path)
         except:
             try: 
-                out = pd.read_csv(path, header=None, names=['Place','Name'], encoding='utf_16')
+                out = pd.read_csv(path, encoding='utf_16')
             except: 
                 raise KeyError('encoding type provided to "read_csv" is not the right one')
+
+        # Keep only the first 3 columns: place, name, club
+        if len(out.columns) >= 3:
+            out = out.iloc[:, [0, 1, 2]]
+            out.columns = ['place', 'name', 'club']
+            
+            # Clean data
+            out = out.dropna()
+            out = out.reset_index(drop=True)
+
         return out
 
-   
-    def get_data(self, folder_path = './CX', ext = 'csv'):
+
+    def get_data(self, folder_path = './data/csv', ext = '.csv'):
         """
         Reads csv files in folder_path and returns pandas DataFrames
 
         Args:
             folder_path (str, optional): Path where to search for data files. 
                                         Only children files are taken into account. 
-                                        Defaults to './CX'.
+                                        Defaults to './data/csv'.
             ext (str, optional): Extension of the file to read (only csv handled yet). 
                                 Defaults to 'csv'.
 
         Returns:
             list of pd.DataFrame: content of each file in a list
-            list of str: dates of the corresponding races (in format YYYY-MM-DD)
+            list of datetimes: dates of the corresponding races (in format YYYY-MM-DD)
         """
         df_list = []
-        date_list = []
+        tmp_dates = []
         for file in sorted(os.listdir(folder_path)):
+            if file in ['ranking.csv', 'rankings.csv']:
+                continue
             file_path = os.path.join(folder_path,file)
-            if os.path.isfile(file_path):
-                if ext == 'csv':
-                    df_list.append(self.get_csv(file_path))
-                    date_list.append(file.split('_')[0])
+            if os.path.isfile(file_path) and file.endswith(ext):
+                df_list.append(self.get_csv(file_path))
+                date_str = file.split('_')[0]
+                try:
+                    date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+                    tmp_dates.append(date)
+                except: 
+                    tmp_dates.append(None)
+        
+        date_list = []
+        for i, date in enumerate(tmp_dates):
+            if date is None:
+                date_list.append(min(tmp_dates))
+            else:
+                date_list.append(date)
+
         return df_list, date_list
 
-    
+
     def ask(self, n1,n2):
         """
-        Interactive function which asks the user if to strings correspond to the same person or not
+        Interactive function which asks the user if two strings correspond to the same person or not
 
         Args:
             n1 (str): string for person1 id
@@ -134,66 +145,70 @@ class Ranker():
                 return False
 
 
-    def update_syn(self, syn, n1, n2):
+    def normalize_name(self, name):
         """
-        Updates the dictionnary of synonyms.
-
-        Args:
-            syn (dict): Dictionnary to update
-            n1 (str): string synonym
-            n2 (str): string synonym
-
-        Returns:
-            dict: Updated version of the dictionnary syn
+        Normalize a runner's name to handle typos and variations
         """
-        target = n1
-        if target in syn.keys():
-            target = syn[target]
+        # Convert to lowercase and remove extra spaces
+        normalized = re.sub(r'\s+', ' ', name.lower().strip())
+        # Remove special characters but keep letters, numbers, and spaces
+        normalized = re.sub(r'[^a-z0-9\s]', '', normalized)
+        return normalized
+    
 
-        source = n2
-        if source in syn.keys():
-            if syn[source]!=target:
-                new_source = syn[source]
-                syn[source] = target
-                source = new_source
-        syn[source] = target
+    def find_similar_name(self, name, threshold=0.85, threshold_2=0.93):
+        """ 
+        Find a similar name in existing runners to handle typos
+        """
+        normalized_name = self.normalize_name(name)
         
-        keys_list = [k for k, v in syn.items() if v == source]
-        for key in keys_list:
-            syn[key] = target
-        return syn
+        # First check exact match
+        if normalized_name in self.name_mapping:
+            return self.name_mapping[normalized_name]
+        
+        # Check for similar names using sequence matching
+        best_match = None
+        best_score = 0
+        
+        for existing_name in self.players.keys():
+            existing_normalized = self.normalize_name(existing_name)
+            score = SequenceMatcher(None, normalized_name, existing_normalized).ratio()
+            
+            if score > best_score and score >= threshold:
+                if score < threshold_2:
+                    if self.ask(name, existing_name):
+                        best_score = score
+                        best_match = existing_name
+                else:
+                    best_score = score
+                    best_match = existing_name
+        
+        return best_match
     
-    
-    def filter_names(self, data):
-        """Gets a DataFrame as input and outputs the list of the unique names in this DataFrame.
-        Duplicates are handled by generating a dictionnary (synonyms) which contains the corresponding value for each key/entry.
 
-        Args:
-            data (DataFrame): DataFrame containing the names
-
-        Returns:
-            dict: dictionnary which value correspond to the synonym of the entry/key
-            list: list of unique names, obtained after filtering duplicates/variants of the same names
+    def get_or_create_player(self, name):
         """
-        names = []
-        for df in data:
-            names += df['Name'].to_list()
-        names = sorted(list(set(names))) #get only unique names
+        Get existing runner or create new one, handling typos
+        """
+        # Try to find similar name first
+        similar_name = self.find_similar_name(name)
+        
+        if similar_name:
+            return similar_name
+        
+        # Create new runner
+        normalized_name = self.normalize_name(name)
+        self.name_mapping[normalized_name] = name
+        
+        # Save updated name mappings to cache
+        self.save_name_mappings(self.name_mapping)
+        
+        # Create a new Player
+        self.players[name] = openelo.Player()
+        return name
 
-        synonyms = {}
-        for i,name in enumerate(names):
-            for n in names[i+1:]:
-                if 100>fuzz.ratio(n,name)>=93:
-                    self.update_syn(synonyms,name,n)
-                elif 93>fuzz.ratio(n,name)>=86:
-                    if self.ask(name,n):
-                        self.update_syn(synonyms,name,n)
 
-        f_names = list(set(names)-set(synonyms.keys()))
-        return synonyms, f_names
-    
-    
-    def get_standing(self, df):
+    def process_race(self, df, weight = 1.0, date = None):
         """Converts the DataFrame of one race into the standing format for openelo method
 
         Args:
@@ -202,39 +217,70 @@ class Ranker():
         Returns:
             list: returns a list of [openelo.Player, int, int] where first and secondd ints are the place in standings. For ties, these are different.
         """
-        standing = []
-        last_place = 1
-        for idx in range(len(df)): 
+
+        df['name'] = df['name'].apply(self.get_or_create_player)
+
+        standings = []
+        last_place = 0
+        for idx, row in df.iterrows(): 
             try: 
-                place_1 = int(df['Place'][idx]) - 1
+                place_1 = int(row['place']) - 1
                 place_2 = place_1 
                 last_place += 1
             except: 
                 place_1 = last_place
-                place_2 = len(df)
+                place_2 = len(df) - 1
             
-            race_name = df['Name'][idx]
-            if race_name in (self.synonyms).keys():
-                name = self.synonyms[race_name]
-            elif race_name in self.players:
-                name = race_name
-            else:
-                warnings.warn('New racer detected !!! '+str(race_name)+' is not registered in the name database yet.')
-                name = race_name
-                for n in (self.players).keys():
-                    if 100>fuzz.ratio(n,name)>=93:
-                        self.update_syn(self.synonyms,name,n)
-                    elif 93>fuzz.ratio(n,name)>=86:
-                        if self.ask(name,n):
-                            self.update_syn(self.synonyms,name,n)
-                        else:
-                            self.players[name] = openelo.Player()
-                    else:
-                        self.players[name] = openelo.Player() 
+            name = row['name']
 
-            standing.append([self.players[name], place_1, place_2])
+            standings.append([self.players[name], place_1, place_2])
 
-        return standing
+
+        # Update ratings using elommr
+        crp = openelo.ContestRatingParams(weight=weight)
+        if date:
+            (self.method).round_update(crp, standings, contest_time=date)
+        else:
+            (self.method).round_update(crp, standings)
+        
+        # Store race history
+        self.race_history.append({
+            'race_data': df.copy(),
+            'standings': standings
+        })
+
+
+    def save_name_mappings(self, name_mapping, cache_file='name_mappings.pkl'):
+        """
+        Save name mappings to cache file
+        """
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(name_mapping, f)
+            print(f"Name mappings saved to cache: {cache_path}")
+        except Exception as e:
+            print(f"Error saving name mappings to cache: {e}")
+
+
+    def load_name_mappings(self, cache_file='name_mappings.pkl'):
+        """
+        Load name mappings from cache file
+        """
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'rb') as f:
+                    name_mapping = pickle.load(f)
+                print(f"Name mappings loaded from cache: {cache_path}")
+                return name_mapping
+            except Exception as e:
+                print(f"Error loading name mappings from cache: {e}")
+        return {}
+
+
+    def date_to_int(self,dt_time):
+        return 10000*dt_time.year + 100*dt_time.month + dt_time.day
 
 
     def rank(self, folder, ext = 'csv'):
@@ -244,74 +290,184 @@ class Ranker():
             folder (str): Path to where are stored the csv files with standings for each race
             ext (str, optional): extension file to read. Defaults to 'csv'.
         """
-        df_list, dates = self.get_data(folder, ext)
-        self.synonyms, names = self.filter_names(df_list) 
-        self.players = {name:openelo.Player() for name in names}
+        df_list, date_list = self.get_data(folder, ext)
 
         #Update a priori rank based on potential previous knowledge:
-        if not self.previous_rank is None:
+        if self.previous_rank:
             for name,rating in (self.previous_rank).items():
-                if name in (self.players).keys():
-                    self.players[name] = openelo.Player.with_rating(rating, 500. ,update_time=0)
-                elif name in (self.synonyms).keys():
-                    self.players[self.synonyms[name]] = openelo.Player.with_rating(rating, 500. ,update_time=0)
-                else:
-                    for n in (self.players).keys():
-                        if (100>fuzz.ratio(n,name)>=93) and (n in (self.players).keys()):
-                            self.players[n] = openelo.Player.with_rating(rating, 500. ,update_time=0)
-                        elif (93>fuzz.ratio(n,name)>=86) and (n in (self.players).keys()):
-                            if self.ask(name,n):
-                                self.players[n] = openelo.Player.with_rating(rating, 500. ,update_time=0)
+                name = self.get_or_create_player(name)
+                self.players[name] = openelo.Player.with_rating(rating, 500. ,update_time=0)
 
-        try:
-            day = dates[0].split('-')
-            first_date = datetime( int(day[0]), int(day[1]), int(day[2]))
-        except:
-            first_date = datetime(2022,12,22) #Put an old enough value so that it is before every race date
+        #For exponential weighting based on date
+        differences = [d-min(date_list) for d in date_list]
+        weights = [np.exp(-d/np.max(differences)) for d in differences]
 
         for idx,df in enumerate(df_list):
-            standing = self.get_standing(df)
-            try:
-                day = dates[idx].split('-')
-                tmp_date = datetime( int(day[0]), int(day[1]), int(day[2]))
-                contest_time = round((tmp_date-first_date).total_seconds())
-            except:
-                contest_time += (86400) #Corresponds to one day
-            (self.method).round_update(self.crp, standing, contest_time=contest_time)
-            
-    
-    def export_rank(self, save_name = None, ext = 'html'):
-        """Creates a file with the ranking computed
-
-        Args:
-            save_name (str, optional): Name of the file to be saved. Defaults to None.
-            ext (str, optional): File extension to take
-        """
-        if save_name is None:
-            save_name = self.method_name
-
-        ratings = [player.normal_factor.mu for player in (self.players).values()]
-        names = list(self.players.keys())
-        ratings, names =  zip(*sorted(zip(ratings,names), reverse=True))
-
-        content = pd.DataFrame({'Rank': list(range(1,len(names)+1)),
-                                'Name': names,
-                                'Rating': ratings})
+            if len(df) > 1:
+                self.process_race(df, date=self.date_to_int(date_list[idx])) #, weight=weights[idx]
+            else:
+                print(f"Skipping {df.to_string()}: not enough runners")
         
-        fname = save_name + '_' + datetime.today().strftime('%Y-%m-%d')
+        # Save final name mappings to cache
+        self.save_name_mappings(self.name_mapping)
+
+
+    def save_rankings(self, folder='./data/csv', fname='ranking', ext = 'csv'):
+        """
+        Save current ranking to CSV file
+        """
+        ranking = self.get_rankings()
+        
+        # Create DataFrame with name, rating, and races count
+        df = pd.DataFrame(ranking, columns=['name', 'rating', 'races_participated'])
+        df['rank'] = range(1, len(df) + 1)
+        df = df[['rank', 'name', 'rating', 'races_participated']]
+        
         if ext == 'csv':
-            content.to_csv(fname + '.csv', index=False)
+            fpath = os.path.join(folder,fname + '.csv')
+            df.to_csv(fpath, index=False)
+            print(f"Ranking saved to {fpath}")
         elif ext == 'html':
-            content.to_html(fname + '.html', index=False)
+            fpath = os.path.join(folder,fname + '.html')
+            df.to_html(fpath, index=False)
+            print(f"Ranking saved to {fpath}")
         else:
             raise ValueError('File type other than "csv" or "html" are not handled')
+        
+        return df
+
+    
+    def get_rankings(self, top_n=None, min_races=3):
+        """
+        Get current Elo rankings sorted by rating, filtering out players with less than min_races
+        
+        Args:
+            top_n (int, optional): Number of top players to return. Defaults to None.
+            min_races (int, optional): Minimum number of races required. Defaults to 3.
+        """
+        # Get current ratings from players
+        rankings = []
+        for name, player in self.players.items():
+            # Count races participated for this player
+            races_participated = 0
+            for race in self.race_history:
+                race_data = race['race_data']
+                if name in race_data['name'].values:
+                    races_participated += 1
+            
+            # Only include players with at least min_races
+            if races_participated >= min_races:
+                rating = player.approx_posterior.mu
+                rankings.append((name, rating, races_participated))
+        
+        # Sort by rating (descending)
+        rankings.sort(key=lambda x: x[1], reverse=True)
+        
+        if top_n:
+            rankings = rankings[:top_n]
+        
+        return rankings
+    
+    def get_player_stats(self, player_name):
+        """
+        Get statistics for a specific runner
+        """
+        if player_name not in self.players:
+            return None
+        
+        player = self.players[player_name]
+        stats = {
+            'name': player_name,
+            'current_rating': player.approx_posterior.mu,
+            'rating_uncertainty': player.approx_posterior.sig,
+            'races_participated': 0,
+            'best_finish': float('inf'),
+            'total_races': 0
+        }
+        
+        for race in self.race_history:
+            race_data = race['race_data']
+            if player_name in race_data['name'].values:
+                stats['races_participated'] += 1
+                player_place = race_data[race_data['name'] == player_name]['place'].iloc[0]
+                if isinstance(player_place, int) or isinstance(player_place, float):
+                    stats['best_finish'] = min(stats['best_finish'], int(player_place))
+        
+        if stats['best_finish'] == float('inf'):
+            stats['best_finish'] = None
+            
+        return stats
+
+
+    def print_top_rankings(self, top_n=20):
+        """
+        Print top N rankings
+        """
+        rankings = self.get_rankings(top_n)
+        
+        print(f"\nTop {len(rankings)} Runner Rankings:")
+        print("-" * 70)
+        print(f"{'Rank':<4} {'Name':<30} {'Elo Rating':<10} {'Races':<6}")
+        print("-" * 70)
+        
+        for i, (name, rating, races) in enumerate(rankings, 1):
+            print(f"{i:<4} {name:<30} {rating:<10.1f} {races:<6}")
+
+
+def main(csv_folder, output, top_n):
+    """
+    Main function to run the Elo ranking system
+    """    
+    
+    # Initialize ranker
+    ranker = Ranker()
+    
+    # Process all races
+    ranker.rank(folder=csv_folder)
+    
+    # Display top rankings
+    if top_n:
+        ranker.print_top_rankings(top_n)
+    
+    # Save rankings to file
+    filename, file_extension = os.path.splitext(output)
+    ranker.save_rankings(folder=csv_folder, fname=filename, ext=file_extension)
+    
+    print(f"\nElo ranking system completed !")
+    print(f"Total runners: {len(ranker.players)}")
+    print(f"Total races processed: {len(ranker.race_history)}")
+
+
+def find_outlier(element, folder_path = './data/csv'):
+    """
+    Finds and prints every file in folder_path where element is present in the 'Name' column
+
+    Args:
+        element (str): string to search for in the files
+        folder_path (str, optional): Folder where to scan the different files. Defaults to './CX'.
+    """
+    for file in sorted(os.listdir(folder_path)):
+        file_path = os.path.join(folder_path,file)
+        if os.path.isfile(file_path):
+            csv = get_csv(file_path)
+            if any([element in el for el in csv['name'].to_list()]):
+                print(file_path)
 
 
 # %%
 
 if __name__ == '__main__':
-    ranker = Ranker()
-    ranker.rank(folder='./CX')
-    ranker.export_rank()
-
+    
+    import argparse
+    parser = argparse.ArgumentParser(description='Calculate Elo rankings for runners')
+    parser.add_argument('--csv_folder', type=str, default='data/csv', 
+                       help='Folder containing CSV race files')
+    parser.add_argument('--output', type=str, default='ranking.csv',
+                       help='Output CSV file for rankings')
+    parser.add_argument('--top_n', type=int, default=None,
+                       help='Number of top rankings to display')
+    
+    args = parser.parse_args()
+    
+    main(args.csv_folder, args.output, args.top_n)
 # %%

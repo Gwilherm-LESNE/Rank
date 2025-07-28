@@ -1,0 +1,10 @@
+#For ranking
+numpy
+pandas
+streamlit
+plotly
+openelo
+
+#For parser
+
+camelot-py[base]

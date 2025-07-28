@@ -1,6 +1,13 @@
 # Ignore the following files/folders:
 .vscode/
-CX/
+__pycache__/
+data/csv/*
+data/pdf/*
+cache/*
 *.html
 *.csv
 *.pdf
+*.pkl
+
+
+
