@@ -10,7 +10,8 @@ A Streamlit-based web application for calculating and visualizing Elo rankings f
 - **Multi-Environment Support**: Run PDF parsing in a separate conda environment
 - **Minimum Races Filter**: Filter out runners who participated in fewer than a specified number of races
 - **Auto-Load Rankings**: Automatically loads and displays existing rankings from `data/csv/ranking.csv` if available
-- **Name Mappings Cache**: Caches name mappings to avoid recomputing them on each update
+- **Name Mappings Cache**: Caches name mappings to avoid recomputing them on each update (JSON format with alphabetically ordered keys)
+- **Different Names Cache**: Caches confirmed different names to avoid re-asking users about name similarities
 
 ## Setup
 
@@ -19,25 +20,28 @@ A Streamlit-based web application for calculating and visualizing Elo rankings f
 The PDF parsing functionality requires specific packages that are installed in a separate conda environment called `ranking`.
 
 ```bash
-# Create the ranking environment
-conda create -n ranking python=3.9
-
-# Activate the environment
-conda activate ranking
+# Create conda environment for parsing PDFs
+conda create -n parser python=3.10 && conda activate parser
 
 # Install required packages for PDF parsing
 pip install camelot-py opencv-python ghostscript pandas numpy
 
 # Deactivate the environment
 conda deactivate
+
+#Create conda environment for ranking
+conda create -n ranking python=3.10 && conda activate ranking
+
+# Install required packages
+pip install openelo numpy pandas
 ```
 
 ### 2. Install Streamlit App Dependencies
 
-In your main environment (or create a new one):
+In your ranking environment:
 
 ```bash
-pip install streamlit pandas plotly openelo numpy
+pip install streamlit plotly
 ```
 
 ## Usage
@@ -86,8 +90,33 @@ Rank/
 ├── parse_files.py      # PDF parsing functionality
 ├── test_conda_parse.py # Environment testing script
 ├── cache/              # Cache directory for name mappings
-│   └── name_mappings.pkl # Cached name mappings
+│   ├── name_mappings.json # Cached name mappings (JSON format)
+│   └── different_names.json # Cached confirmed different names (JSON format)
 └── README.md          # This file
+```
+
+## Cache File Formats
+
+The system uses two JSON cache files to improve performance:
+
+### Name Mappings Cache (`name_mappings.json`)
+Stores normalized name mappings to handle typos and variations:
+```json
+{
+  "alice smith": "Alice Smith",
+  "bob jones": "Bob Jones",
+  "charlie brown": "Charlie Brown"
+}
+```
+
+### Different Names Cache (`different_names.json`)
+Stores confirmed different names to avoid re-asking users:
+```json
+{
+  "alice smith": ["alice smithson"],
+  "bob jones": ["bob johnson"],
+  "charlie brown": ["charles brown"]
+}
 ```
 
 ## Key Modifications
@@ -103,7 +132,7 @@ Rank/
 
 - **Attribute Correction**: Fixed `self.runner_players` to `self.players` in `get_rankings()` method
 - **Consistent Naming**: Ensured all references use the correct attribute names
-- **Cache Implementation**: Added name mappings cache to avoid recomputing mappings on each update
+- **Cache Implementation**: Added name mappings cache and different names cache to avoid recomputing mappings and re-asking users (JSON format with alphabetical key ordering)
 
 ## Troubleshooting
 
@@ -147,4 +176,4 @@ This will check:
 
 ## License
 
-This project is part of the ECM (École Centrale de Marseille) runner ranking system. 
+This project is personal

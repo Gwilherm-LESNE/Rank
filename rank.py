@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import os
 import datetime
-import pickle
 import json
 
 #%%
@@ -34,13 +33,18 @@ class Ranker:
         else:
             raise ValueError("Only 'elommr' as a method is handled yet")
         
-        self.players = {} # name -> Player object
         self.name_mapping = self.load_name_mappings()  # Load from cache
+        self.players = {} # name -> Player object
+        if len(self.name_mapping) > 0:
+            self.players = {name: openelo.Player() for name in self.name_mapping.values()}
         self.race_history = []
+        
+        # Load confirmed different names cache
+        self.different_names = self.load_different_names()
 
         if previous_rank:
             try:
-                df = pd.read_csv(previous_rank, header=None, names=['rank','name','rating'])
+                df = pd.read_csv(previous_rank)
                 self.previous_rank = dict(zip(df['name'].to_list(),df['rating'].to_list()))
             except:
                 self.previous_rank = None
@@ -151,6 +155,22 @@ class Ranker:
         """
         # Convert to lowercase and remove extra spaces
         normalized = re.sub(r'\s+', ' ', name.lower().strip())
+        
+        # Replace accented letters with their non-accented counterparts
+        accent_replacements = {
+            'à': 'a', 'â': 'a', 'ä': 'a',
+            'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+            'î': 'i', 'ï': 'i',
+            'ô': 'o', 'ö': 'o',
+            'ù': 'u', 'û': 'u', 'ü': 'u',
+            'ÿ': 'y',
+            'ç': 'c',
+            'ñ': 'n'
+        }
+        
+        for accented, replacement in accent_replacements.items():
+            normalized = normalized.replace(accented, replacement)
+        
         # Remove special characters but keep letters, numbers, and spaces
         normalized = re.sub(r'[^a-z0-9\s]', '', normalized)
         return normalized
@@ -175,10 +195,20 @@ class Ranker:
             score = SequenceMatcher(None, normalized_name, existing_normalized).ratio()
             
             if score > best_score and score >= threshold:
+                # Check if these names were previously confirmed as different
+                name_pair = tuple(sorted([normalized_name, existing_normalized]))
+                if name_pair in self.different_names:
+                    continue  # Skip this pair as they were confirmed as different
+                
                 if score < threshold_2:
                     if self.ask(name, existing_name):
                         best_score = score
                         best_match = existing_name
+                        self.name_mapping[normalized_name] = existing_name
+                    else:
+                        # Store that these names are different
+                        self.different_names[name_pair] = True
+                        self.save_different_names(self.different_names)
                 else:
                     best_score = score
                     best_match = existing_name
@@ -235,7 +265,6 @@ class Ranker:
 
             standings.append([self.players[name], place_1, place_2])
 
-
         # Update ratings using elommr
         crp = openelo.ContestRatingParams(weight=weight)
         if date:
@@ -250,32 +279,87 @@ class Ranker:
         })
 
 
-    def save_name_mappings(self, name_mapping, cache_file='name_mappings.pkl'):
+    def save_name_mappings(self, name_mapping, cache_file='name_mappings.json'):
         """
-        Save name mappings to cache file
+        Save name mappings to cache file as JSON with alphabetically ordered keys
         """
         cache_path = os.path.join(self.cache_dir, cache_file)
         try:
-            with open(cache_path, 'wb') as f:
-                pickle.dump(name_mapping, f)
+            # Sort the dictionary by keys alphabetically
+            sorted_mapping = dict(sorted(name_mapping.items()))
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(sorted_mapping, f, indent=2, ensure_ascii=False)
             print(f"Name mappings saved to cache: {cache_path}")
         except Exception as e:
             print(f"Error saving name mappings to cache: {e}")
 
 
-    def load_name_mappings(self, cache_file='name_mappings.pkl'):
+    def load_name_mappings(self, cache_file='name_mappings.json'):
         """
-        Load name mappings from cache file
+        Load name mappings from cache file as JSON
         """
         cache_path = os.path.join(self.cache_dir, cache_file)
         if os.path.exists(cache_path):
             try:
-                with open(cache_path, 'rb') as f:
-                    name_mapping = pickle.load(f)
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    name_mapping = json.load(f)
                 print(f"Name mappings loaded from cache: {cache_path}")
                 return name_mapping
             except Exception as e:
                 print(f"Error loading name mappings from cache: {e}")
+        return {}
+
+
+    def save_different_names(self, different_names, cache_file='different_names.json'):
+        """
+        Save confirmed different names to cache file as JSON with first name as key and list of different names as value
+        """
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        try:
+            # Convert tuple keys to single name key with list of different names
+            converted_dict = {}
+            for name_pair, _ in different_names.items():
+                if isinstance(name_pair, tuple) and len(name_pair) == 2:
+                    # Sort the names and use the first as key
+                    sorted_names = sorted(name_pair)
+                    key_name = sorted_names[0]
+                    different_name = sorted_names[1]
+                    
+                    if key_name not in converted_dict:
+                        converted_dict[key_name] = []
+                    converted_dict[key_name].append(different_name)
+            
+            # Sort the dictionary by keys alphabetically
+            sorted_different = dict(sorted(converted_dict.items()))
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(sorted_different, f)
+            print(f"Different names saved to cache: {cache_path}")
+        except Exception as e:
+            print(f"Error saving different names to cache: {e}")
+
+
+    def load_different_names(self, cache_file='different_names.json'):
+        """
+        Load confirmed different names from cache file as JSON and convert to internal tuple format
+        """
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    json_different_names = json.load(f)
+                
+                # Convert from JSON format (name -> list) back to internal format (tuple -> bool)
+                different_names = {}
+                for key_name, different_list in json_different_names.items():
+                    for different_name in different_list:
+                        # Create sorted tuple as key
+                        name_pair = tuple(sorted([key_name, different_name]))
+                        different_names[name_pair] = True
+                
+                print(f"Different names loaded from cache: {cache_path}")
+                return different_names
+            except Exception as e:
+                print(f"Error loading different names from cache: {e}")
         return {}
 
 
@@ -297,7 +381,7 @@ class Ranker:
             for name,rating in (self.previous_rank).items():
                 name = self.get_or_create_player(name)
                 self.players[name] = openelo.Player.with_rating(rating, 500. ,update_time=0)
-
+        
         #For exponential weighting based on date
         differences = [d-min(date_list) for d in date_list]
         weights = [np.exp(-d/np.max(differences)) for d in differences]
@@ -310,6 +394,8 @@ class Ranker:
         
         # Save final name mappings to cache
         self.save_name_mappings(self.name_mapping)
+        # Save final different names to cache
+        self.save_different_names(self.different_names)
 
 
     def save_rankings(self, folder='./data/csv', fname='ranking', ext = 'csv'):
@@ -390,8 +476,9 @@ class Ranker:
             if player_name in race_data['name'].values:
                 stats['races_participated'] += 1
                 player_place = race_data[race_data['name'] == player_name]['place'].iloc[0]
-                if isinstance(player_place, int) or isinstance(player_place, float):
-                    stats['best_finish'] = min(stats['best_finish'], int(player_place))
+                if isinstance(player_place, str) and (not player_place.isdigit()):
+                    player_place = len(race_data)
+                stats['best_finish'] = min(stats['best_finish'], int(player_place))
         
         if stats['best_finish'] == float('inf'):
             stats['best_finish'] = None
@@ -412,6 +499,32 @@ class Ranker:
         
         for i, (name, rating, races) in enumerate(rankings, 1):
             print(f"{i:<4} {name:<30} {rating:<10.1f} {races:<6}")
+
+
+    def clear_cache(self):
+        """
+        Clear the name mappings cache and different names cache
+        """
+        # Clear name mappings cache
+        cache_path = os.path.join(self.cache_dir, 'name_mappings.json')
+        if os.path.exists(cache_path):
+            try:
+                os.remove(cache_path)
+                print(f"Name mappings cache cleared: {cache_path}")
+            except Exception as e:
+                print(f"Error clearing name mappings cache: {e}")
+        
+        # Clear different names cache
+        different_cache_path = os.path.join(self.cache_dir, 'different_names.json')
+        if os.path.exists(different_cache_path):
+            try:
+                os.remove(different_cache_path)
+                print(f"Different names cache cleared: {different_cache_path}")
+            except Exception as e:
+                print(f"Error clearing different names cache: {e}")
+        
+        self.name_mapping = {}
+        self.different_names = {}
 
 
 def main(csv_folder, output, top_n):
