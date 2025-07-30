@@ -8,6 +8,8 @@ from pathlib import Path
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import json
+import datetime
 
 # Add the current directory to Python path to import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -75,17 +77,20 @@ def load_existing_rankings():
     if os.path.exists(ranking_file):
         try:
             df = pd.read_csv(ranking_file)
-            return df
+            # Also create a ranker object to enable cyclist details
+            ranker = Ranker(previous_rank=ranking_file)
+            return df, ranker
         except Exception as e:
             st.error(f"Error loading existing rankings: {str(e)}")
-            return None
-    return None
+            return None, None
+    return None, None
 
 # Load existing rankings on app start
 if st.session_state.rankings_df is None:
-    existing_rankings = load_existing_rankings()
+    existing_rankings, existing_ranker = load_existing_rankings()
     if existing_rankings is not None:
         st.session_state.rankings_df = existing_rankings
+        st.session_state.ranker = existing_ranker
         # Show success message in sidebar
         st.sidebar.success("✅ Loaded existing rankings from data/csv/ranking.csv")
 
@@ -158,9 +163,9 @@ def main():
                     rankings_data = ranker.get_rankings(min_races=min_races)
                     
                     # Create DataFrame from filtered rankings
-                    rankings_df = pd.DataFrame(rankings_data, columns=['name', 'rating', 'races_participated'])
-                    rankings_df['rank'] = range(1, len(rankings_df) + 1)
-                    rankings_df = rankings_df[['rank', 'name', 'rating', 'races_participated']]
+                    rankings_df = pd.DataFrame(rankings_data, columns=['name', 'rating', 'sigma', 'races_participated'])
+                    rankings_df['rank'] = range(1, len(rankings_df) + 1)                
+                    rankings_df = rankings_df[['rank', 'name', 'rating', 'sigma', 'races_participated']]
                     
                     # Save rankings
                     ranker.save_rankings(folder="data/csv", fname="ranking", ext="csv")
@@ -183,9 +188,9 @@ def main():
                         rankings_data = st.session_state.ranker.get_rankings(min_races=min_races)
                         
                         # Create DataFrame from filtered rankings
-                        rankings_df = pd.DataFrame(rankings_data, columns=['name', 'rating', 'races_participated'])
-                        rankings_df['rank'] = range(1, len(rankings_df) + 1)
-                        rankings_df = rankings_df[['rank', 'name', 'rating', 'races_participated']]
+                        rankings_df = pd.DataFrame(rankings_data, columns=['name', 'rating', 'sigma', 'races_participated'])
+                        rankings_df['rank'] = range(1, len(rankings_df) + 1)                        
+                        rankings_df = rankings_df[['rank', 'name', 'rating', 'sigma', 'races_participated']]
                         
                         # Update session state
                         st.session_state.rankings_df = rankings_df
@@ -211,8 +216,16 @@ def main():
             st.divider()
             st.subheader("🗄️ Cache Management")
             
-
-            if os.path.exists(os.path.join(st.session_state.ranker.cache_dir, 'name_mappings.json')) or os.path.exists(os.path.join(st.session_state.ranker.cache_dir, 'different_names.json')):
+            # Check if any cache files exist
+            cache_files_exist = (
+                os.path.exists(os.path.join(st.session_state.ranker.cache_dir, 'name_mappings.json')) or 
+                os.path.exists(os.path.join(st.session_state.ranker.cache_dir, 'different_names.json')) or
+                os.path.exists(os.path.join(st.session_state.ranker.cache_dir, 'processed_races.json')) or
+                os.path.exists(os.path.join(st.session_state.ranker.cache_dir, 'race_history.json'))
+            )
+            
+            if cache_files_exist:
+                                
                 if st.button("🗑️ Clear All Caches", type="secondary"):
                     st.session_state.ranker.clear_cache()
                     st.success("✅ All caches cleared!")
@@ -269,7 +282,7 @@ def main():
     st.divider()
     
     # Runner Details section below rankings
-    st.header("📈 Runner Details")
+    st.header("📈 Cyclist Details")
     
     if st.session_state.rankings_df is not None:
         # Apply minimum races filter to displayed rankings
@@ -328,8 +341,24 @@ def main():
                         race_data = race['race_data']
                         if selected_runner in race_data['name'].values:
                             runner_place = race_data[race_data['name'] == selected_runner]['place'].iloc[0]
+                            race_name = race.get('race_name', f'Race {i+1}')
+                            # Clean up race name for display (remove .csv extension and format date)
+                            if race_name.endswith('.csv'):
+                                race_name = race_name[:-4]  # Remove .csv extension
+                            # Try to format the date part if it exists
+                            if race_name[-2] == '_' and race_name[-1].isdigit():
+                                race_name = race_name[:-2]
+
+                            idx = 1
+                            tmp_race_name = race_name
+                            while tmp_race_name in [h['race_name'] for h in rating_history]:
+                                tmp_race_name = f"{race_name}_{idx}"
+                                idx += 1
+                            race_name = tmp_race_name
+                            
                             rating_history.append({
                                 'race': i + 1,
+                                'race_name': race_name,
                                 'place': runner_place,
                                 'total_runners': len(race_data)
                             })
@@ -347,7 +376,7 @@ def main():
                         # Race performance over time
                         fig.add_trace(
                             go.Scatter(
-                                x=history_df['race'],
+                                x=history_df['race_name'],
                                 y=history_df['place'],
                                 mode='lines+markers',
                                 name='Place',
@@ -362,7 +391,7 @@ def main():
                             showlegend=False,
                         )
                         
-                        fig.update_xaxes(title_text="Race Number")
+                        fig.update_xaxes(title_text="Race", tickangle=-45)
                         fig.update_yaxes(title_text="Place")
                         
                         st.plotly_chart(fig, use_container_width=True)

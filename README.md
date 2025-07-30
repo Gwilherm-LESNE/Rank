@@ -71,12 +71,11 @@ curl ipv4.icanhazip.com
 
 3. **Calculate Rankings**: Set the minimum number of races required and optionally provide a previous rankings file, then click "Calculate Rankings".
 
-4. **Filter Rankings**: Use the "Minimum Races Required" slider to filter out runners who participated in fewer races. Click "Recalculate with Current Filter" to apply the filter to existing rankings.
+4. **Filter Rankings**: Use the "Minimum Races Required" slider to filter out runners who participated in fewer races. Click "Update details" to apply the filter to existing rankings.
 
 5. **View Results**: The app will display:
    - Current rankings table (filtered by minimum races)
-   - Top 10 runners chart
-   - Individual runner statistics
+   - Individual cyclist statistics
    - Performance history graphs
 
 6. **Cache Management**: The app automatically caches name mappings to speed up processing. You can view cache statistics and clear the cache if needed.
@@ -89,15 +88,20 @@ Rank/
 ├── rank.py             # Elo ranking calculation logic
 ├── parse_files.py      # PDF parsing functionality
 ├── test_conda_parse.py # Environment testing script
+├── data/              
+│   ├── pdf/            # Folder containing the race results as pdf. File names are expected to fit 'YYYY_MM_DD_race-name.pdf'
+│   └── csv/            # Folder containing the race results parsed by camelot (button parse file in the app)
 ├── cache/              # Cache directory for name mappings
 │   ├── name_mappings.json # Cached name mappings (JSON format)
-│   └── different_names.json # Cached confirmed different names (JSON format)
+│   ├── different_names.json # Cached confirmed different names (JSON format)
+│   ├── processed_races.json # Cached races that are already processed (JSON format)
+│   └── race_history.json # Cached result per race (JSON format)
 └── README.md          # This file
 ```
 
 ## Cache File Formats
 
-The system uses two JSON cache files to improve performance:
+The system uses four JSON cache files to improve performance:
 
 ### Name Mappings Cache (`name_mappings.json`)
 Stores normalized name mappings to handle typos and variations:
@@ -119,20 +123,11 @@ Stores confirmed different names to avoid re-asking users:
 }
 ```
 
-## Key Modifications
+### Processed Races
+Stores the list of races that are already processed in order to avoid to compute them twice.
 
-### App.py Changes
-
-- **Subprocess Integration**: Added `run_parse_files_in_conda()` function to run PDF parsing in the `ranking` conda environment
-- **Updated Imports**: Changed from `RunnerEloRanker` to `Ranker` class
-- **Method Updates**: Updated method calls to match the corrected `rank.py` implementation
-- **Error Handling**: Enhanced error handling for subprocess operations
-
-### Rank.py Fixes
-
-- **Attribute Correction**: Fixed `self.runner_players` to `self.players` in `get_rankings()` method
-- **Consistent Naming**: Ensured all references use the correct attribute names
-- **Cache Implementation**: Added name mappings cache and different names cache to avoid recomputing mappings and re-asking users (JSON format with alphabetical key ordering)
+### Race History
+Stores the cyclist results for each race. It is used to retrieve the results of each cyclist when plotting the 'cyclist details' in the app.
 
 ## Troubleshooting
 
@@ -160,14 +155,14 @@ This will check:
 
 ## Dependencies
 
-### Main App Environment
+### Ranking Environment (Main App)
 - streamlit
 - pandas
 - plotly
 - openelo
 - numpy
 
-### Ranking Environment (for PDF parsing)
+### Parsing Environment (for PDF parsing)
 - camelot-py
 - opencv-python
 - ghostscript
@@ -176,4 +171,4 @@ This will check:
 
 ## License
 
-This project is personal
+This project is personal, released under MIT license

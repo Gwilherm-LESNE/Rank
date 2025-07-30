@@ -42,14 +42,38 @@ class Ranker:
         # Load confirmed different names cache
         self.different_names = self.load_different_names()
 
+        # Load processed races cache only when using previous ranking
+        self.processed_races = {}
+        self.race_history = []
+        if previous_rank:
+            self.processed_races = self.load_processed_races()
+            # Load race history cache for cyclist details
+            self.race_history = self.load_race_history()
+
         if previous_rank:
             try:
                 df = pd.read_csv(previous_rank)
-                self.previous_rank = dict(zip(df['name'].to_list(),df['rating'].to_list()))
+                # Check if sigma column exists, otherwise use default
+                if 'sigma' in df.columns:
+                    self.previous_rank = dict(zip(df['name'].to_list(), df['rating'].to_list()))
+                    self.previous_sigma = dict(zip(df['name'].to_list(), df['sigma'].to_list()))
+                else:
+                    # Backward compatibility: if no sigma column, use default sigma
+                    self.previous_rank = dict(zip(df['name'].to_list(), df['rating'].to_list()))
+                    self.previous_sigma = {name: 500.0 for name in df['name'].to_list()}
             except:
                 self.previous_rank = None
+                self.previous_sigma = None
         else: 
             self.previous_rank = None
+            self.previous_sigma = None
+
+        #Update a priori rank based on potential previous knowledge:
+        if self.previous_rank:
+            for name, rating in (self.previous_rank).items():
+                name = self.get_or_create_player(name)
+                sigma = self.previous_sigma.get(name, 500.0) if self.previous_sigma else 500.0
+                self.players[name] = openelo.Player.with_rating(rating, sigma, update_time=0)
 
 
     def get_csv(self, path):
@@ -99,22 +123,33 @@ class Ranker:
         Returns:
             list of pd.DataFrame: content of each file in a list
             list of datetimes: dates of the corresponding races (in format YYYY-MM-DD)
+            list of str: file names of the processed races
         """
         df_list = []
         tmp_dates = []
+        processed_files = []
+        
         for file in sorted(os.listdir(folder_path)):
             if file in ['ranking.csv', 'rankings.csv']:
                 continue
             file_path = os.path.join(folder_path,file)
             if os.path.isfile(file_path) and file.endswith(ext):
+                # Skip files that have already been processed when using previous ranking
+                if self.previous_rank and file in self.processed_races:
+                    print(f"Skipping already processed file: {file}")
+                    continue
+                
                 df_list.append(self.get_csv(file_path))
+
+                processed_files.append(file)
+
                 date_str = file.split('_')[0]
                 try:
                     date = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
                     tmp_dates.append(date)
                 except: 
                     tmp_dates.append(None)
-        
+                
         date_list = []
         for i, date in enumerate(tmp_dates):
             if date is None:
@@ -122,7 +157,7 @@ class Ranker:
             else:
                 date_list.append(date)
 
-        return df_list, date_list
+        return df_list, date_list, processed_files
 
 
     def ask(self, n1,n2):
@@ -238,11 +273,14 @@ class Ranker:
         return name
 
 
-    def process_race(self, df, weight = 1.0, date = None):
+    def process_race(self, df, weight = 1.0, date = None, race_name = None):
         """Converts the DataFrame of one race into the standing format for openelo method
 
         Args:
             df (pd.DataFrame): DataFrame containing the standings of one race, with possible ties (Abandons)
+            weight (float, optional): Weight for the race. Defaults to 1.0.
+            date (int, optional): Date of the race. Defaults to None.
+            race_name (str, optional): Name of the race file. Defaults to None.
 
         Returns:
             list: returns a list of [openelo.Player, int, int] where first and secondd ints are the place in standings. For ties, these are different.
@@ -275,8 +313,150 @@ class Ranker:
         # Store race history
         self.race_history.append({
             'race_data': df.copy(),
-            'standings': standings
+            'standings': standings,
+            'race_name': race_name
         })
+
+
+    def date_to_int(self,dt_time):
+        return 10000*dt_time.year + 100*dt_time.month + dt_time.day
+
+
+    def rank(self, folder, ext = 'csv'):
+        """Computes the ranking based on the files contained in folder
+
+        Args:
+            folder (str): Path to where are stored the csv files with standings for each race
+            ext (str, optional): extension file to read. Defaults to 'csv'.
+        """
+        df_list, date_list, processed_files = self.get_data(folder, ext)
+        
+        #For exponential weighting based on date
+        differences = [d-min(date_list) for d in date_list]
+        weights = [np.exp(-d/np.max(differences)) for d in differences]
+
+        for idx,df in enumerate(df_list):
+            if len(df) > 1:
+                self.process_race(df, date=self.date_to_int(date_list[idx]), race_name=processed_files[idx]) #, weight=weights[idx]
+            else:
+                print(f"Skipping {df.to_string()}: not enough runners")
+        
+        # Save final name mappings to cache
+        self.save_name_mappings(self.name_mapping)
+        # Save final different names to cache
+        self.save_different_names(self.different_names)
+        # Save processed races cache
+        # Update processed races cache with new files
+        self.processed_races.update({file: 1 for file in processed_files})
+        self.save_processed_races(self.processed_races)
+        # Save race history cache
+        self.save_race_history(self.race_history)
+
+
+    def save_rankings(self, folder='./data/csv', fname='ranking', ext = 'csv'):
+        """
+        Save current ranking to CSV file
+        """
+        ranking = self.get_rankings()
+        
+        # Create DataFrame with name, rating, sigma, and races count
+        df = pd.DataFrame(ranking, columns=['name', 'rating', 'sigma', 'races_participated'])
+        df['rank'] = range(1, len(df) + 1)
+        
+
+        df = df[['rank', 'name', 'rating', 'sigma', 'races_participated']]
+        
+        if ext == 'csv':
+            fpath = os.path.join(folder,fname + '.csv')
+            df.to_csv(fpath, index=False)
+            print(f"Ranking saved to {fpath}")
+        elif ext == 'html':
+            fpath = os.path.join(folder,fname + '.html')
+            df.to_html(fpath, index=False)
+            print(f"Ranking saved to {fpath}")
+        else:
+            raise ValueError('File type other than "csv" or "html" are not handled')
+        
+        return df
+
+    
+    def get_rankings(self, top_n=None, min_races=3):
+        """
+        Get current Elo rankings sorted by rating, filtering out players with less than min_races
+        
+        Args:
+            top_n (int, optional): Number of top players to return. Defaults to None.
+            min_races (int, optional): Minimum number of races required. Defaults to 3.
+        """
+        # Get current ratings from players
+        rankings = []
+        for name, player in self.players.items():
+            # Count races participated for this player
+            races_participated = 0
+            for race in self.race_history:
+                race_data = race['race_data']
+                if name in race_data['name'].values:
+                    races_participated += 1
+            
+            # Only include players with at least min_races
+            if races_participated >= min_races:
+                rating = player.approx_posterior.mu
+                sigma = player.approx_posterior.sig
+                rankings.append((name, rating, sigma, races_participated))
+        
+        # Sort by rating (descending)
+        rankings.sort(key=lambda x: x[1], reverse=True)
+        
+        if top_n:
+            rankings = rankings[:top_n]
+        
+        return rankings
+    
+    def get_player_stats(self, player_name):
+        """
+        Get statistics for a specific runner
+        """
+        if player_name not in self.players:
+            return None
+        
+        player = self.players[player_name]
+        stats = {
+            'name': player_name,
+            'current_rating': player.approx_posterior.mu,
+            'rating_uncertainty': player.approx_posterior.sig,
+            'races_participated': 0,
+            'best_finish': float('inf'),
+            'total_races': 0
+        }
+        
+        for race in self.race_history:
+            race_data = race['race_data']
+            if player_name in race_data['name'].values:
+                stats['races_participated'] += 1
+                player_place = race_data[race_data['name'] == player_name]['place'].iloc[0]
+                if isinstance(player_place, str) and (not player_place.isdigit()):
+                    player_place = len(race_data)
+                stats['best_finish'] = min(stats['best_finish'], int(player_place))
+        
+        if stats['best_finish'] == float('inf'):
+            stats['best_finish'] = None
+            
+        return stats
+
+
+    def print_top_rankings(self, top_n=20):
+        """
+        Print top N rankings
+        """
+        rankings = self.get_rankings(top_n)
+        
+        print(f"\nTop {len(rankings)} Runner Rankings:")
+        print("-" * 70)
+        print(f"{'Rank':<4} {'Name':<30} {'Elo Rating':<10} {'Races':<6}")
+        print("-" * 70)
+        
+        for i, (name, rating, races) in enumerate(rankings, 1):
+            print(f"{i:<4} {name:<30} {rating:<10.1f} {races:<6}")
 
 
     def save_name_mappings(self, name_mapping, cache_file='name_mappings.json'):
@@ -363,147 +543,88 @@ class Ranker:
         return {}
 
 
-    def date_to_int(self,dt_time):
-        return 10000*dt_time.year + 100*dt_time.month + dt_time.day
-
-
-    def rank(self, folder, ext = 'csv'):
-        """Computes the ranking based on the files contained in folder
-
-        Args:
-            folder (str): Path to where are stored the csv files with standings for each race
-            ext (str, optional): extension file to read. Defaults to 'csv'.
+    def save_processed_races(self, processed_races, cache_file='processed_races.json'):
         """
-        df_list, date_list = self.get_data(folder, ext)
-
-        #Update a priori rank based on potential previous knowledge:
-        if self.previous_rank:
-            for name,rating in (self.previous_rank).items():
-                name = self.get_or_create_player(name)
-                self.players[name] = openelo.Player.with_rating(rating, 500. ,update_time=0)
-        
-        #For exponential weighting based on date
-        differences = [d-min(date_list) for d in date_list]
-        weights = [np.exp(-d/np.max(differences)) for d in differences]
-
-        for idx,df in enumerate(df_list):
-            if len(df) > 1:
-                self.process_race(df, date=self.date_to_int(date_list[idx])) #, weight=weights[idx]
-            else:
-                print(f"Skipping {df.to_string()}: not enough runners")
-        
-        # Save final name mappings to cache
-        self.save_name_mappings(self.name_mapping)
-        # Save final different names to cache
-        self.save_different_names(self.different_names)
-
-
-    def save_rankings(self, folder='./data/csv', fname='ranking', ext = 'csv'):
+        Save processed race data to cache file as JSON
         """
-        Save current ranking to CSV file
-        """
-        ranking = self.get_rankings()
-        
-        # Create DataFrame with name, rating, and races count
-        df = pd.DataFrame(ranking, columns=['name', 'rating', 'races_participated'])
-        df['rank'] = range(1, len(df) + 1)
-        df = df[['rank', 'name', 'rating', 'races_participated']]
-        
-        if ext == 'csv':
-            fpath = os.path.join(folder,fname + '.csv')
-            df.to_csv(fpath, index=False)
-            print(f"Ranking saved to {fpath}")
-        elif ext == 'html':
-            fpath = os.path.join(folder,fname + '.html')
-            df.to_html(fpath, index=False)
-            print(f"Ranking saved to {fpath}")
-        else:
-            raise ValueError('File type other than "csv" or "html" are not handled')
-        
-        return df
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        try:
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(processed_races, f)
+            print(f"Processed races saved to cache: {cache_path}")
+        except Exception as e:
+            print(f"Error saving processed races to cache: {e}")
 
-    
-    def get_rankings(self, top_n=None, min_races=3):
+
+    def load_processed_races(self, cache_file='processed_races.json'):
         """
-        Get current Elo rankings sorted by rating, filtering out players with less than min_races
-        
-        Args:
-            top_n (int, optional): Number of top players to return. Defaults to None.
-            min_races (int, optional): Minimum number of races required. Defaults to 3.
+        Load processed race data from cache file as JSON
         """
-        # Get current ratings from players
-        rankings = []
-        for name, player in self.players.items():
-            # Count races participated for this player
-            races_participated = 0
-            for race in self.race_history:
-                race_data = race['race_data']
-                if name in race_data['name'].values:
-                    races_participated += 1
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    processed_races = json.load(f)
+                print(f"Processed races loaded from cache: {cache_path}")
+                return processed_races
+            except Exception as e:
+                print(f"Error loading processed races from cache: {e}")
+        return {}
+
+
+    def save_race_history(self, race_history, cache_file='race_history.json'):
+        """
+        Save race history to cache file as JSON
+        """
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        try:
+            # Convert race history to serializable format
+            serializable_history = []
+            for race in race_history:
+                serializable_race = {
+                    'race_data': race['race_data'].to_dict('records'),
+                    'race_name': race.get('race_name', ''),
+                    'standings': []  # We don't need to save standings as they're not used for display
+                }
+                serializable_history.append(serializable_race)
             
-            # Only include players with at least min_races
-            if races_participated >= min_races:
-                rating = player.approx_posterior.mu
-                rankings.append((name, rating, races_participated))
-        
-        # Sort by rating (descending)
-        rankings.sort(key=lambda x: x[1], reverse=True)
-        
-        if top_n:
-            rankings = rankings[:top_n]
-        
-        return rankings
-    
-    def get_player_stats(self, player_name):
-        """
-        Get statistics for a specific runner
-        """
-        if player_name not in self.players:
-            return None
-        
-        player = self.players[player_name]
-        stats = {
-            'name': player_name,
-            'current_rating': player.approx_posterior.mu,
-            'rating_uncertainty': player.approx_posterior.sig,
-            'races_participated': 0,
-            'best_finish': float('inf'),
-            'total_races': 0
-        }
-        
-        for race in self.race_history:
-            race_data = race['race_data']
-            if player_name in race_data['name'].values:
-                stats['races_participated'] += 1
-                player_place = race_data[race_data['name'] == player_name]['place'].iloc[0]
-                if isinstance(player_place, str) and (not player_place.isdigit()):
-                    player_place = len(race_data)
-                stats['best_finish'] = min(stats['best_finish'], int(player_place))
-        
-        if stats['best_finish'] == float('inf'):
-            stats['best_finish'] = None
-            
-        return stats
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(serializable_history, f, indent=2, ensure_ascii=False)
+            print(f"Race history saved to cache: {cache_path}")
+        except Exception as e:
+            print(f"Error saving race history to cache: {e}")
 
 
-    def print_top_rankings(self, top_n=20):
+    def load_race_history(self, cache_file='race_history.json'):
         """
-        Print top N rankings
+        Load race history from cache file as JSON
         """
-        rankings = self.get_rankings(top_n)
-        
-        print(f"\nTop {len(rankings)} Runner Rankings:")
-        print("-" * 70)
-        print(f"{'Rank':<4} {'Name':<30} {'Elo Rating':<10} {'Races':<6}")
-        print("-" * 70)
-        
-        for i, (name, rating, races) in enumerate(rankings, 1):
-            print(f"{i:<4} {name:<30} {rating:<10.1f} {races:<6}")
+        cache_path = os.path.join(self.cache_dir, cache_file)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    serializable_history = json.load(f)
+                
+                # Convert back to original format
+                race_history = []
+                for race in serializable_history:
+                    race_data = pd.DataFrame(race['race_data'])
+                    race_history.append({
+                        'race_data': race_data,
+                        'race_name': race.get('race_name', ''),
+                        'standings': []  # Empty standings as they're not needed for display
+                    })
+                
+                print(f"Race history loaded from cache: {cache_path}")
+                return race_history
+            except Exception as e:
+                print(f"Error loading race history from cache: {e}")
+        return []
 
 
     def clear_cache(self):
         """
-        Clear the name mappings cache and different names cache
+        Clear the name mappings cache, different names cache, processed races cache, and race history cache
         """
         # Clear name mappings cache
         cache_path = os.path.join(self.cache_dir, 'name_mappings.json')
@@ -523,8 +644,33 @@ class Ranker:
             except Exception as e:
                 print(f"Error clearing different names cache: {e}")
         
+        # Clear processed races cache
+        processed_cache_path = os.path.join(self.cache_dir, 'processed_races.json')
+        if os.path.exists(processed_cache_path):
+            try:
+                os.remove(processed_cache_path)
+                print(f"Processed races cache cleared: {processed_cache_path}")
+            except Exception as e:
+                print(f"Error clearing processed races cache: {e}")
+        
+        # Clear race history cache
+        history_cache_path = os.path.join(self.cache_dir, 'race_history.json')
+        if os.path.exists(history_cache_path):
+            try:
+                os.remove(history_cache_path)
+                print(f"Race history cache cleared: {history_cache_path}")
+            except Exception as e:
+                print(f"Error clearing race history cache: {e}")
+        
         self.name_mapping = {}
         self.different_names = {}
+        self.processed_races = {}
+        self.race_history = []
+
+
+
+#-----------------------------------------------------#
+
 
 
 def main(csv_folder, output, top_n):
