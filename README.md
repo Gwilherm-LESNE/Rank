@@ -98,6 +98,68 @@ curl ipv4.icanhazip.com
 
 6. **Cache Management**: The app automatically caches name mappings to speed up processing. You can view cache statistics and clear the cache if needed.
 
+## Development Workflow
+
+### Updating Rankings and Deploying
+
+When you have new race data to process and want to update the rankings:
+
+1. **Switch to dev branch**
+   ```bash
+   git checkout dev
+   # If dev branch doesn't exist, create it:
+   # git checkout -b dev
+   ```
+
+2. **Process new race data**
+   ```bash
+   # Parse new PDF files (if any)
+   streamlit run app.py
+   # Or run the ranking system directly
+   python rank.py --csv_folder data/csv --output ranking.csv
+   ```
+
+3. **Verify cache files are updated**
+   ```bash
+   # Check that docs/cache/ files are updated
+   ls -la docs/cache/
+   ```
+
+4. **Commit changes to dev branch**
+   ```bash
+   git add .
+   git commit -m "Update rankings with new race data"
+   git push origin dev
+   ```
+
+5. **Test the changes**
+   - Run locally: `cd docs && python -m http.server 8000`
+   - Or check the dev branch deployment (if configured)
+
+6. **Merge to main branch**
+   ```bash
+   git checkout main
+   git merge dev
+   git push origin main
+   ```
+
+7. **GitHub Pages will automatically update**
+   - The main branch deployment will update with the new rankings
+   - This ensures the live site always has the latest data
+
+### Branch Strategy
+
+- **`main`**: Production branch with stable rankings
+- **`dev`**: Development branch for testing new rankings before deployment
+- **Feature branches**: For major changes or new features
+
+### Best Practices
+
+- Always test rankings on dev branch before merging to main
+- Include descriptive commit messages when updating rankings
+- Verify cache files are committed with ranking updates
+- Use pull requests for major changes
+
 ## File Structure
 
 ```

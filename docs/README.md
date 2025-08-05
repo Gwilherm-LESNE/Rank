@@ -131,19 +131,42 @@ When you select a runner, you'll see:
 
 To update the rankings on the web interface:
 
-1. Run the ranking system:
+### Development Workflow (Recommended)
+
+1. **Switch to dev branch**
+   ```bash
+   git checkout dev
+   # If dev branch doesn't exist, create it:
+   # git checkout -b dev
+   ```
+
+2. **Run the ranking system**
    ```bash
    python rank.py --csv_folder data/csv --output ranking.csv
    ```
 
-2. Commit the updated cache files:
+3. **Test locally**
    ```bash
-   git add docs/cache/
-   git commit -m "Update rankings"
-   git push
+   cd docs
+   python -m http.server 8000
+   # Open http://localhost:8000 to verify changes
    ```
 
-3. GitHub Pages will automatically redeploy with the new data
+4. **Commit to dev branch**
+   ```bash
+   git add docs/cache/
+   git commit -m "Update rankings with new race data"
+   git push origin dev
+   ```
+
+5. **Merge to main branch**
+   ```bash
+   git checkout main
+   git merge dev
+   git push origin main
+   ```
+
+6. **GitHub Pages will automatically redeploy** with the new data
 
 ## Troubleshooting
 
