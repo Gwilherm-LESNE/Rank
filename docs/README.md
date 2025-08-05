@@ -19,7 +19,7 @@ This directory contains the web interface for the FSGT CX Ranking system.
    python rank.py --csv_folder data/csv --output ranking.csv
    ```
 
-2. Verify cache files exist in `page/cache/`:
+2. Verify cache files exist in `docs/cache/`:
    - `ranking.csv`
    - `race_history.json`
    - `processed_races.json`
@@ -28,7 +28,7 @@ This directory contains the web interface for the FSGT CX Ranking system.
 
 1. **Option 1: Using Python's built-in server**
    ```bash
-   cd page
+   cd docs
    python -m http.server 8000
    ```
    Then open: http://localhost:8000
@@ -40,7 +40,7 @@ This directory contains the web interface for the FSGT CX Ranking system.
 ### Troubleshooting Local Issues
 
 - **CORS Errors**: Make sure you're using a web server, not opening the file directly
-- **File Not Found**: Check that cache files exist in the `page/cache/` directory
+- **File Not Found**: Check that cache files exist in the `docs/cache/` directory
 - **Port Already in Use**: Try a different port: `python -m http.server 8001`
 
 ## GitHub Pages Deployment
@@ -59,7 +59,7 @@ This directory contains the web interface for the FSGT CX Ranking system.
    - Navigate to Settings → Pages
    - Under "Source", select "Deploy from a branch"
    - Choose your main branch (usually `main` or `master`)
-   - Set the folder to `/page`
+   - Set the folder to `/docs`
    - Click "Save"
 
 3. **Wait for deployment**
@@ -78,7 +78,7 @@ This directory contains the web interface for the FSGT CX Ranking system.
 
 ```
 your-repository/
-├── page/
+├── docs/
 │   ├── index.html          # Main web page
 │   ├── .nojekyll          # Disable Jekyll processing
 │   ├── README.md          # This file
@@ -138,7 +138,7 @@ To update the rankings on the web interface:
 
 2. Commit the updated cache files:
    ```bash
-   git add page/cache/
+   git add docs/cache/
    git commit -m "Update rankings"
    git push
    ```
@@ -150,12 +150,12 @@ To update the rankings on the web interface:
 ### Common Issues
 
 1. **"Error loading rankings"**
-   - Check that `page/cache/ranking.csv` exists
+   - Check that `docs/cache/ranking.csv` exists
    - Verify the file is committed to the repository
    - For local development, ensure you're using a web server
 
 2. **"No race history available"**
-   - Check that `page/cache/race_history.json` exists
+   - Check that `docs/cache/race_history.json` exists
    - Verify the file contains valid JSON data
 
 3. **Charts not displaying**

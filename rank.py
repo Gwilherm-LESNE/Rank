@@ -554,8 +554,8 @@ class Ranker:
         try:
             with open(cache_path, 'w', encoding='utf-8') as f:
                 json.dump(processed_races, f)
-            os.makedirs('page/cache', exist_ok=True)
-            with open('page/cache/processed_races.json', 'w', encoding='utf-8') as f:
+            os.makedirs('docs/cache', exist_ok=True)
+            with open('docs/cache/processed_races.json', 'w', encoding='utf-8') as f:
                     json.dump(processed_races, f)
             print(f"Processed races saved to cache: {cache_path}")
         except Exception as e:
@@ -596,8 +596,8 @@ class Ranker:
             
             with open(cache_path, 'w', encoding='utf-8') as f:
                 json.dump(serializable_history, f, indent=2, ensure_ascii=False)
-            os.makedirs('page/cache', exist_ok=True)
-            with open('page/cache/race_history.json', 'w', encoding='utf-8') as f:
+            os.makedirs('docs/cache', exist_ok=True)
+            with open('docs/cache/race_history.json', 'w', encoding='utf-8') as f:
                 json.dump(serializable_history, f, indent=2, ensure_ascii=False)
             print(f"Race history saved to cache: {cache_path}")
         except Exception as e:
@@ -700,7 +700,7 @@ def main(csv_folder, output, top_n):
     # Save rankings to file
     filename, file_extension = os.path.splitext(output)
     ranker.save_rankings(folder=csv_folder, fname=filename, ext=file_extension) #For sabing and caching
-    ranker.save_rankings(folder="page/cache", fname=filename, ext=file_extension) #For plotting on the web
+    ranker.save_rankings(folder="docs/cache", fname=filename, ext=file_extension) #For plotting on the web
     
     print(f"\nElo ranking system completed !")
     print(f"Total runners: {len(ranker.players)}")

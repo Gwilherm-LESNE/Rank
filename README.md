@@ -57,18 +57,18 @@ streamlit run app.py
 
 #### Local Development
 ```bash
-cd page
+cd docs
 python -m http.server 8000
 ```
 Then open: http://localhost:8000
 
 #### GitHub Pages Deployment
-1. Commit all files including the `page/cache/` directory
+1. Commit all files including the `docs/cache/` directory
 2. Go to repository Settings → Pages
-3. Set source to "Deploy from a branch" and folder to `/page`
+3. Set source to "Deploy from a branch" and folder to `/docs`
 4. Your site will be available at: `https://yourusername.github.io/yourrepository/`
 
-For detailed web interface instructions, see [page/README.md](page/README.md).
+For detailed web interface instructions, see [docs/README.md](docs/README.md).
 
 ## Using LocalTunnel
 
@@ -114,7 +114,7 @@ Rank/
 │   ├── different_names.json # Cached confirmed different names (JSON format)
 │   ├── processed_races.json # Cached races that are already processed (JSON format)
 │   └── race_history.json # Cached result per race (JSON format)
-├── page/               # Web interface (GitHub Pages compatible)
+├── docs/               # Web interface (GitHub Pages compatible)
 │   ├── index.html      # Main web page
 │   ├── .nojekyll       # Disable Jekyll processing for GitHub Pages
 │   ├── README.md       # Web interface documentation
