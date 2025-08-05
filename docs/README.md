@@ -106,8 +106,9 @@ your-repository/
 ### Viewing Rankings
 
 1. **Display Limit**: Choose how many top runners to show (10, 20, 50, 100, or all)
-2. **Minimum Races**: Set the minimum number of races a runner must have participated in
-3. **Runner Selection**: Use the dropdown to select a specific runner for detailed view
+2. **Runner Selection**: Use the dropdown to select a specific runner for detailed view (sorted alphabetically)
+
+**Note**: Only runners who participated in at least 3 races are displayed in the rankings.
 
 ### Runner Details
 

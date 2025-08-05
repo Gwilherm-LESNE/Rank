@@ -238,6 +238,7 @@
         <div class="header">
             <h1>FSGT CX Ranking</h1>
             <p>Runner Ranking System with EloMMR Algorithm</p>
+            <p style="font-size: 1.1rem; margin-top: 10px; opacity: 0.9;">Based on the complete 2024 CX season</p>
         </div>
 
         <div class="controls">
@@ -251,10 +252,6 @@
                         <option value="100">Top 100</option>
                         <option value="all">All Runners</option>
                     </select>
-                </div>
-                <div class="control-item">
-                    <label for="minRaces">Minimum Races:</label>
-                    <input type="number" id="minRaces" value="3" min="1" max="10">
                 </div>
                 <div class="control-item">
                     <label for="runnerSelect">Select Runner for Details:</label>
@@ -309,6 +306,13 @@
         </div>
     </div>
 
+    <!-- Footer -->
+    <div style="text-align: center; margin-top: 40px; padding: 20px; color: #666; border-top: 1px solid #eee;">
+        <p style="font-size: 0.9em; margin-top: 10px;">
+            <em>Note: Only runners who participated in at least 3 races are displayed in the rankings.</em>
+        </p>
+    </div>
+
     <script>
         // Global variables
         let rankingsData = [];
@@ -323,7 +327,6 @@
 
         // Event listeners
         document.getElementById('displayLimit').addEventListener('change', updateRankingsDisplay);
-        document.getElementById('minRaces').addEventListener('change', updateRankingsDisplay);
         document.getElementById('runnerSelect').addEventListener('change', updateRunnerDetails);
 
         async function loadRankings() {
@@ -428,7 +431,12 @@
             const select = document.getElementById('runnerSelect');
             select.innerHTML = '<option value="">Choose a runner...</option>';
             
-            currentFilteredRankings.forEach(runner => {
+            // Sort runners alphabetically by name
+            const sortedRunners = [...currentFilteredRankings].sort((a, b) => 
+                a.name.localeCompare(b.name)
+            );
+            
+            sortedRunners.forEach(runner => {
                 const option = document.createElement('option');
                 option.value = runner.name;
                 option.textContent = runner.name;
@@ -438,11 +446,10 @@
 
         function updateRankingsDisplay() {
             const displayLimit = document.getElementById('displayLimit').value;
-            const minRaces = parseInt(document.getElementById('minRaces').value);
             
             // Filter by minimum races
             currentFilteredRankings = rankingsData.filter(runner => 
-                parseInt(runner.races_participated) >= minRaces
+                parseInt(runner.races_participated) >= 3
             );
             
             // Apply display limit
@@ -594,10 +601,17 @@
                     r: 30,
                     t: 60,
                     b: 80
-                }
+                },
+                showlegend: false,
+                hovermode: 'closest'
             };
             
-            Plotly.newPlot('resultChart', [trace], layout);
+            const config = {
+                displayModeBar: false,
+                responsive: true
+            };
+            
+            Plotly.newPlot('resultChart', [trace], layout, config);
         }
     </script>
 </body>
