@@ -8,7 +8,6 @@ A Streamlit-based web application for calculating and visualizing Elo rankings f
 - **Elo Ranking**: Calculate Elo ratings using the EloMMR algorithm
 - **Interactive Dashboard**: Visualize rankings and runner statistics
 - **Multi-Environment Support**: Run PDF parsing in a separate conda environment
-- **Minimum Races Filter**: Filter out runners who participated in fewer than a specified number of races
 - **Auto-Load Rankings**: Automatically loads and displays existing rankings from `data/csv/ranking.csv` if available
 - **Name Mappings Cache**: Caches name mappings to avoid recomputing them on each update (JSON format with alphabetically ordered keys)
 - **Different Names Cache**: Caches confirmed different names to avoid re-asking users about name similarities
@@ -89,10 +88,10 @@ curl ipv4.icanhazip.com
 
 3. **Calculate Rankings**: Set the minimum number of races required and optionally provide a previous rankings file, then click "Calculate Rankings".
 
-4. **Filter Rankings**: Use the "Minimum Races Required" slider to filter out runners who participated in fewer races. Click "Update details" to apply the filter to existing rankings.
+4. **Filter Rankings**: Use the "Display Limit" dropdown to show different numbers of top runners. Click "Update details" to apply the filter to existing rankings.
 
 5. **View Results**: The app will display:
-   - Current rankings table (filtered by minimum races)
+   - Current rankings table (filtered by minimum 3 races)
    - Individual cyclist statistics
    - Performance history graphs
 
