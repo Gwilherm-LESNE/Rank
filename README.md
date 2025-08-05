@@ -12,6 +12,7 @@ A Streamlit-based web application for calculating and visualizing Elo rankings f
 - **Auto-Load Rankings**: Automatically loads and displays existing rankings from `data/csv/ranking.csv` if available
 - **Name Mappings Cache**: Caches name mappings to avoid recomputing them on each update (JSON format with alphabetically ordered keys)
 - **Different Names Cache**: Caches confirmed different names to avoid re-asking users about name similarities
+- **Web Interface**: Static HTML page for viewing rankings (works with GitHub Pages)
 
 ## Setup
 
@@ -46,11 +47,28 @@ pip install streamlit plotly
 
 ## Usage
 
-### Running the App
+### Running the Streamlit App
 
 ```bash
 streamlit run app.py
 ```
+
+### Running the Web Interface
+
+#### Local Development
+```bash
+cd page
+python -m http.server 8000
+```
+Then open: http://localhost:8000
+
+#### GitHub Pages Deployment
+1. Commit all files including the `page/cache/` directory
+2. Go to repository Settings → Pages
+3. Set source to "Deploy from a branch" and folder to `/page`
+4. Your site will be available at: `https://yourusername.github.io/yourrepository/`
+
+For detailed web interface instructions, see [page/README.md](page/README.md).
 
 ## Using LocalTunnel
 
@@ -96,6 +114,14 @@ Rank/
 │   ├── different_names.json # Cached confirmed different names (JSON format)
 │   ├── processed_races.json # Cached races that are already processed (JSON format)
 │   └── race_history.json # Cached result per race (JSON format)
+├── page/               # Web interface (GitHub Pages compatible)
+│   ├── index.html      # Main web page
+│   ├── .nojekyll       # Disable Jekyll processing for GitHub Pages
+│   ├── README.md       # Web interface documentation
+│   └── cache/          # Cache files for web interface
+│       ├── ranking.csv # Rankings data
+│       ├── race_history.json # Race history data
+│       └── processed_races.json # Processed races data
 └── README.md          # This file
 ```
 
