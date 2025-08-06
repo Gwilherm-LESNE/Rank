@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FSGT CX Ranking</title>
+    <title>Classement CX FSGT</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -236,36 +236,36 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>FSGT CX Ranking</h1>
-            <p>Runner Ranking System with EloMMR Algorithm</p>
-            <p style="font-size: 1.1rem; margin-top: 10px; opacity: 0.9;">Based on the complete 2024 CX season</p>
+            <h1>Classement CX FSGT Île-de-France</h1>
+            <p>Système de classement EloMMR</p>
+            <p style="font-size: 1.1rem; margin-top: 10px; opacity: 0.9;">Basé sur la saison complète 2024 CX</p>
         </div>
 
         <div class="controls">
             <div class="control-group">
                 <div class="control-item">
-                    <label for="displayLimit">Display Limit:</label>
+                    <label for="displayLimit">Nombre de coureurs affichés:</label>
                     <select id="displayLimit">
                         <option value="10">Top 10</option>
                         <option value="20">Top 20</option>
                         <option value="50">Top 50</option>
                         <option value="100">Top 100</option>
-                        <option value="all">All Runners</option>
+                        <option value="all">Tous les coureurs</option>
                     </select>
                 </div>
                 <div class="control-item">
-                    <label for="runnerSelect">Select Runner for Details:</label>
+                    <label for="runnerSelect">Détails:</label>
                     <select id="runnerSelect">
-                        <option value="">Choose a runner...</option>
+                        <option value="">Choisir un coureur...</option>
                     </select>
                 </div>
             </div>
         </div>
 
         <div class="rankings-section">
-            <h2>Rankings</h2>
+            <h2>Classement</h2>
             <div id="rankingsTable">
-                <div class="loading">Loading rankings...</div>
+                <div class="loading">Chargement des classements...</div>
             </div>
         </div>
 
@@ -278,29 +278,29 @@
 
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-label">Current Rank</div>
+                    <div class="stat-label">Rang</div>
                     <div class="stat-value" id="currentRank">-</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Elo Rating</div>
+                    <div class="stat-label">Classement Elo</div>
                     <div class="stat-value" id="eloRating">-</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Rating Uncertainty</div>
+                    <div class="stat-label">Incertitude</div>
                     <div class="stat-value" id="ratingUncertainty">-</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Races Participated</div>
+                    <div class="stat-label">Courses participées</div>
                     <div class="stat-value" id="racesParticipated">-</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Best Finish</div>
+                    <div class="stat-label">Meilleur résultat</div>
                     <div class="stat-value" id="bestFinish">-</div>
                 </div>
             </div>
 
             <div class="chart-container">
-                <h3>📈 Result History</h3>
+                <h3>📈 Historique des résultats</h3>
                 <div id="resultChart"></div>
             </div>
         </div>
@@ -309,7 +309,7 @@
     <!-- Footer -->
     <div style="text-align: center; margin-top: 40px; padding: 20px; color: #666; border-top: 1px solid #eee;">
         <p style="font-size: 0.9em; margin-top: 10px;">
-            <em>Note: Only runners who participated in at least 3 races are displayed in the rankings.</em>
+            <em>Note: Seuls les coureurs qui ont participé à au moins 3 courses sont affichés dans ce classement.</em>
         </p>
     </div>
 
@@ -429,7 +429,7 @@
 
         function updateRunnerSelect() {
             const select = document.getElementById('runnerSelect');
-            select.innerHTML = '<option value="">Choose a runner...</option>';
+            select.innerHTML = '<option value="">Choisir un coureur...</option>';
             
             // Sort runners alphabetically by name
             const sortedRunners = [...currentFilteredRankings].sort((a, b) => 
@@ -468,7 +468,7 @@
 
         function generateRankingsTable(data) {
             if (data.length === 0) {
-                return '<div class="no-data">No runners meet the current criteria.</div>';
+                return '<div class="no-data">Aucun coureur ne répond aux critères actuels.</div>';
             }
             
             let tableHTML = `
@@ -476,11 +476,11 @@
                     <table class="rankings-table">
                         <thead>
                             <tr>
-                                <th>Rank</th>
-                                <th>Name</th>
-                                <th>Elo Rating</th>
-                                <th>Uncertainty</th>
-                                <th>Races</th>
+                                <th>Rang</th>
+                                <th>Nom</th>
+                                <th>Classement Elo</th>
+                                <th>Incertitude</th>
+                                <th>Participations</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -565,7 +565,7 @@
         function createResultChart(history) {
             if (history.length === 0) {
                 document.getElementById('resultChart').innerHTML = 
-                    '<div class="no-data">No race history available for this runner.</div>';
+                    '<div class="no-data">Aucun historique de courses disponible pour ce coureur.</div>';
                 return;
             }
             
@@ -586,14 +586,14 @@
             };
             
             const layout = {
-                title: 'Race Performance Over Time',
+                title: 'Résultat par course',
                 xaxis: {
-                    title: 'Race',
+                    title: 'Course',
                     tickangle: -45
                 },
                 yaxis: {
-                    title: 'Place',
-                    autorange: 'reversed' // Lower numbers (better places) at top
+                    title: 'Classement',
+                    autorange: 'reversed' // Les meilleurs classements (places plus basse) en haut
                 },
                 height: 400,
                 margin: {
